@@ -51,7 +51,9 @@ def test_requests_structured_json_without_thinking(monkeypatch):
         return httpx.Response(200, json={
             "choices": [{
                 "finish_reason": "stop",
-                "message": {"content": '{"capabilities":["email.read","calendar.create"],"reason":"OK"}'},
+                "message": {
+                    "content": '{"capabilities":["email.read","calendar.create"],"reason":"OK"}'
+                },
             }],
         })
 
