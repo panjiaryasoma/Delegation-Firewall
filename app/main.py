@@ -153,7 +153,7 @@ def plan(payload: PlanRequest, request: Request):
     # Fail closed for negated instructions or requests involving unsupported side effects.
     required = (
         r"\b(?:read|check|scan|extract|find|baca|cari|periksa)\b",
-        r"\b(?:email|inbox|e-mail)\b",
+        r"\b(?:email|emails|inbox|e-mail|e-mails|mail|mails)\b",
         r"\b(?:deadline|tenggat|submission)\b",
         r"\b(?:add|create|schedule|put|masukkan|tambahkan|buat|catat)\b",
         r"\b(?:calendar|kalender)\b",
