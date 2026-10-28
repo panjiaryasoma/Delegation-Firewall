@@ -1,12 +1,17 @@
-"""Single-origin FastAPI application; no real Gmail/Calendar access in this MVP."""
+"""Single-origin FastAPI sandbox. Real providers are intentionally not connected."""
 
 from __future__ import annotations
 
+import os
+import secrets
+import threading
+import time
+from collections import defaultdict, deque
 from pathlib import Path
 from typing import Literal
 
-from fastapi import FastAPI, HTTPException
-from fastapi.responses import FileResponse
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -17,8 +22,13 @@ from app.policy import CAPABILITIES, PlanSigner, PolicyError, approved_policy, s
 ROOT = Path(__file__).resolve().parent.parent
 _key, _configured_secret = signing_key()
 signer = PlanSigner(_key)
-app = FastAPI(title="Delegation Firewall", version="0.1.0", docs_url="/api/docs")
+app = FastAPI(title="Delegation Firewall", version="0.2.0", docs_url=None, redoc_url=None)
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
+
+# In-process budget controls, NOT a distributed enforcement guarantee.
+_window_lock = threading.Lock()
+_hits: dict[str, deque[float]] = defaultdict(deque)
+_inference_slots = threading.BoundedSemaphore(2)
 
 
 class PlanRequest(BaseModel):
@@ -31,6 +41,63 @@ class RunRequest(BaseModel):
     scenario: Literal["normal", "overreach", "prompt_injection"] = "prompt_injection"
 
 
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    response = await call_next(request)
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Content-Security-Policy"] = (
+        "default-src 'self'; script-src 'self'; style-src 'self'; "
+        "connect-src 'self'; img-src 'self' data:; object-src 'none'; "
+        "base-uri 'none'; frame-ancestors 'none'; form-action 'self'"
+    )
+    if request.url.path.startswith("/api/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+def require_access(request: Request) -> None:
+    """Protect paid inference behind a server-side shared demo password."""
+    client = NebiusClient()
+    if client.demo:
+        return
+    if not client.api_key:
+        raise HTTPException(status_code=503, detail="Nebius inference is not configured")
+    if not _configured_secret:
+        raise HTTPException(status_code=503, detail="APP_SIGNING_KEY is required in live mode")
+    expected = os.getenv("APP_ACCESS_KEY", "")
+    if len(expected) < 24:
+        raise HTTPException(status_code=503, detail="APP_ACCESS_KEY is required in live mode")
+    received = request.headers.get("X-Demo-Access-Key", "")
+    if not secrets.compare_digest(expected, received):
+        raise HTTPException(status_code=401, detail="Invalid demo access key")
+
+
+def check_budget(request: Request) -> None:
+    # Proxy addresses can be shared. This limit is per worker and intentionally conservative.
+    identity = request.client.host if request.client else "unknown"
+    now = time.monotonic()
+    with _window_lock:
+        events = _hits[identity]
+        while events and now - events[0] > 60:
+            events.popleft()
+        if len(events) >= 12:
+            raise HTTPException(status_code=429, detail="Request limit reached; retry later")
+        events.append(now)
+        # Do not accumulate stale identities forever in this small demonstration service.
+        if len(_hits) > 1024:
+            for key, history in list(_hits.items()):
+                if not history or now - history[-1] > 60:
+                    del _hits[key]
+
+
+def inference_slot():
+    if not _inference_slots.acquire(blocking=False):
+        raise HTTPException(status_code=429, detail="Inference capacity reached; retry later")
+    return _inference_slots
+
+
 @app.get("/")
 def home():
     return FileResponse(ROOT / "static" / "index.html")
@@ -39,13 +106,14 @@ def home():
 @app.get("/api/health")
 def health():
     client = NebiusClient()
+    mode = "SIMULATED" if client.demo else ("NEBIUS_CONFIGURED" if client.api_key else "NO_API_KEY")
     return {
         "service": "delegation-firewall",
         "status": "ok",
-        "mode": (client.mode if client.demo
-                 else ("NEBIUS_CONFIGURED" if client.api_key else "NO_API_KEY")),
+        "mode": mode,
         "model": MODEL,
         "signing_key_configured": _configured_secret,
+        "access_key_required": not client.demo,
         "sandbox_only": True,
     }
 
@@ -56,31 +124,47 @@ def capabilities():
 
 
 @app.post("/api/plan")
-def plan(payload: PlanRequest):
+def plan(payload: PlanRequest, request: Request):
+    check_budget(request)
+    require_access(request)
+    intent = payload.intent.strip()
+    lowered = intent.casefold()
+    if not (
+        any(word in lowered for word in ("email", "inbox", "mail"))
+        and any(word in lowered for word in ("calendar", "kalender", "event"))
+        and any(word in lowered for word in ("deadline", "tenggat", "submission"))
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Prototype supports email-to-calendar deadline delegation only",
+        )
     client = NebiusClient()
+    slot = inference_slot()
     try:
-        proposed, reason = client.plan(payload.intent.strip())
+        proposed, reason = client.plan(intent)
     except InferenceError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
+    finally:
+        slot.release()
     if not proposed:
-        raise HTTPException(
-            status_code=422, detail="No supported capability identified for this task"
-        )
-    token = signer.issue(payload.intent.strip(), proposed, client.mode)
+        raise HTTPException(status_code=422, detail="No supported capability identified")
+    token = signer.issue(intent, proposed, client.mode)
     return {
-        "intent": payload.intent.strip(),
+        "intent": intent,
         "proposed_capabilities": proposed,
         "not_required": sorted(CAPABILITIES - set(proposed)),
         "reason": reason,
         "plan_token": token,
         "mode": client.mode,
         "model": None if client.demo else MODEL,
-        "expires_in_seconds": 1800,
+        "expires_in_seconds": 900,
     }
 
 
 @app.post("/api/run")
-def run(payload: RunRequest):
+def run(payload: RunRequest, request: Request):
+    check_budget(request)
+    require_access(request)
     try:
         signed = signer.verify(payload.plan_token)
         policy = approved_policy(signed["proposed"], payload.approved_capabilities)
@@ -89,12 +173,13 @@ def run(payload: RunRequest):
     client = NebiusClient()
     if signed["mode"] != client.mode:
         raise HTTPException(status_code=409, detail="Inference mode changed; analyze again")
-    if not client.demo and not client.api_key:
-        raise HTTPException(status_code=503, detail="Nebius key not configured")
-    return execute(signed["intent"], payload.scenario, policy, client)
+    slot = inference_slot()
+    try:
+        return execute(signed["intent"], payload.scenario, policy, client)
+    finally:
+        slot.release()
 
 
 @app.exception_handler(InferenceError)
 async def inference_handler(_request, exc: InferenceError):
-    from fastapi.responses import JSONResponse
     return JSONResponse(status_code=503, content={"detail": str(exc)})
