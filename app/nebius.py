@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 from typing import Any
 
 import httpx
@@ -20,8 +19,21 @@ class InferenceError(RuntimeError):
 
 
 def json_object(content: str) -> dict[str, Any]:
+    """Parse exactly one JSON object; allow only known presentation wrappers."""
     cleaned = content.strip()
-    cleaned = re.sub(r"^```(?:json)?\s*|\s*```$", "", cleaned, flags=re.I)
+    if cleaned.startswith("<think>"):
+        end = cleaned.find("</think>")
+        if end < 0:
+            raise InferenceError("Nemotron reasoning did not finish; no action executed")
+        cleaned = cleaned[end + len("</think>"):].strip()
+    fence = chr(96) * 3
+    if cleaned.startswith(fence):
+        header, separator, body = cleaned.partition("\n")
+        if not separator or header.casefold() not in {fence, f"{fence}json"}:
+            raise InferenceError("Nemotron JSON fence malformed; no action executed")
+        if not body.rstrip().endswith(fence):
+            raise InferenceError("Nemotron JSON fence incomplete; no action executed")
+        cleaned = body.rstrip()[:-len(fence)].strip()
     try:
         obj = json.loads(cleaned)
     except json.JSONDecodeError as exc:
@@ -29,7 +41,6 @@ def json_object(content: str) -> dict[str, Any]:
     if not isinstance(obj, dict):
         raise InferenceError("Nemotron response must be a JSON object")
     return obj
-
 
 class NebiusClient:
     def __init__(self) -> None:
@@ -43,29 +54,59 @@ class NebiusClient:
     def _chat(self, system: str, user: str) -> dict[str, Any]:
         if not self.api_key:
             raise InferenceError("NEBIUS_API_KEY is missing; offline demo requires DEMO_MODE=true")
+        base_request = {
+            "model": MODEL,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+            "temperature": 0,
+        }
+        # NVIDIA recommends JSON mode with thinking disabled for compact structured output.
+        # Model endpoints vary; retry *only* when the provider explicitly rejects a field.
+        variants = (
+            {"response_format": {"type": "json_object"},
+             "chat_template_kwargs": {"enable_thinking": False}, "max_tokens": 1200},
+            {"response_format": {"type": "json_object"}, "max_tokens": 2400},
+            {"max_tokens": 3000},
+        )
         try:
             with httpx.Client(timeout=httpx.Timeout(22.0, connect=5.0)) as http:
-                response = http.post(
-                    f"{BASE_URL}/chat/completions",
-                    headers={"Authorization": f"Bearer {self.api_key}"},
-                    json={
-                        "model": MODEL,
-                        "messages": [
-                            {"role": "system", "content": system},
-                            {"role": "user", "content": user},
-                        ],
-                        "temperature": 0,
-                        "max_tokens": 800,
-                    },
-                )
-                response.raise_for_status()
-                content = response.json()["choices"][0]["message"]["content"]
-                if not isinstance(content, str) or len(content) > 12000:
-                    raise InferenceError("Unsupported model content; no action executed")
-                return json_object(content)
+                for index, fields in enumerate(variants):
+                    response = http.post(
+                        f"{BASE_URL}/chat/completions",
+                        headers={"Authorization": f"Bearer {self.api_key}"},
+                        json={**base_request, **fields},
+                    )
+                    # Never downgrade a valid, denied, rate-limited, or exhausted request.
+                    if response.status_code in {400, 422} and index < len(variants) - 1:
+                        detail = response.text[:1200].casefold()
+                        unsupported_field = any(
+                            field in detail
+                            for field in ("response_format", "chat_template_kwargs",
+                                          "enable_thinking")
+                        )
+                        unsupported_reason = any(
+                            reason in detail
+                            for reason in ("unsupported", "unknown", "extra_forbidden",
+                                           "unexpected", "not allowed", "unrecognized")
+                        )
+                        if unsupported_field and unsupported_reason:
+                            continue
+                    response.raise_for_status()
+                    choice = response.json()["choices"][0]
+                    if choice.get("finish_reason") in {"length", "content_filter"}:
+                        raise InferenceError(
+                            "Nemotron response incomplete or filtered; no action executed"
+                        )
+                    content = choice["message"]["content"]
+                    if not isinstance(content, str) or len(content) > 12000:
+                        raise InferenceError("Unsupported model content; no action executed")
+                    return json_object(content)
+            raise InferenceError("Nebius structured output was not supported")
         except httpx.HTTPStatusError as exc:
             status = exc.response.status_code
-            if status == 400:
+            if status in (400, 422):
                 diagnosis = "Invalid inference request or model parameters"
             elif status == 401:
                 diagnosis = "Nebius API key rejected"
@@ -90,7 +131,6 @@ class NebiusClient:
             raise InferenceError("Nebius network connection failed") from None
         except (KeyError, IndexError, TypeError, ValueError):
             raise InferenceError("Nebius response format invalid; no action executed") from None
-
     def plan(self, intent: str) -> tuple[list[str], str]:
         if self.demo:
             return ["email.read", "calendar.create"], (
