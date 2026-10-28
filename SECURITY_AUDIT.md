@@ -15,12 +15,13 @@ Scope: FastAPI + NVIDIA Nemotron (Nebius Token Factory) **fictional email/calend
 | Medium | API payloads lacked no-store and response CSP | CSP, frame denial, nosniff, no-referrer and API no-store headers |
 | Medium | One auth test passed only in the whole suite | Test config made independent of import order |
 | Low | Stale plan could render after the user edited intent while analysis was running | Revision counter ignores old responses |
+| High | Negated intent could pass keyword checks and still create a calendar event | Conservative allowlist: explicit read + add + email + calendar + deadline required; negation and unsupported action verbs rejected before inference |
 | Low | Unexpected model response type might raise a raw 500 | Catch TypeError and fail closed |
 
 ## Verification
 
-- Local: **425 checks passed** after the hardening patch. This includes **384** capability-by-tool combinations: all 64 permission sets against six mapped tools. Tests of signed-plan tampering, wrong date, duplicate event, unauthorized send, sandbox isolation, access-gating and CSP are included.
-- GitHub Actions: see current final commit's CI status; the final commit must pass both Ruff and pytest before claiming a release gate. Local testing alone is not sufficient.
+- Local (earlier revision): **425 checks passed** after the hardening patch. This includes **384** capability-by-tool combinations: all 64 permission sets against six mapped tools. Tests of signed-plan tampering, wrong date, duplicate event, unauthorized send, sandbox isolation, access-gating and CSP are included.
+- GitHub Actions: see current final commit's CI status (including Node syntax and Python compilation); the final commit must pass both Ruff and pytest before claiming a release gate. Local testing alone is not sufficient.
 - Model identity: default `nvidia/Nemotron-3_5-Lightning` on Nebius Token Factory. No live key was available to prove production inference.
 - Scripted probe is labeled `RED_TEAM_PROBE`. A blocked scripted attempt is not evidence of a successfully induced real model jailbreak.
 
