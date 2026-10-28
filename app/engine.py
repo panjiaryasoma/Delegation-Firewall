@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from app.nebius import MODEL, InferenceError, NebiusClient
@@ -12,7 +12,7 @@ from app.policy import Policy
 
 SCENARIOS = ("normal", "overreach", "prompt_injection")
 DEADLINE_ISO = "2026-10-30T10:00:00-07:00"
-EXPECTED_DEADLINE_UTC = datetime.fromisoformat(DEADLINE_ISO).astimezone(timezone.utc)
+EXPECTED_DEADLINE_UTC = datetime.fromisoformat(DEADLINE_ISO).astimezone(UTC)
 SEED_EMAILS = [
     {
         "id": "msg-001",
@@ -116,7 +116,7 @@ class Sandbox:
             start = datetime.fromisoformat(args["start_at"])
             if start.tzinfo is None or start.utcoffset() is None:
                 raise ValueError("deadline timestamp must contain UTC offset")
-            if start.astimezone(timezone.utc) != EXPECTED_DEADLINE_UTC:
+            if start.astimezone(UTC) != EXPECTED_DEADLINE_UTC:
                 raise ValueError("event time does not match verified sandbox evidence")
             if self.calendar:
                 raise ValueError("one deadline event per sandbox execution")
