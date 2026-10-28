@@ -75,7 +75,9 @@ class NebiusClient:
                 proposed.append("email.read")
             if any(k in words for k in ("calendar", "schedule", "event", "kalender")):
                 proposed.append("calendar.create")
-            return proposed, "Offline demonstration: keyword-based proposal, not Nemotron inference."
+            return proposed, (
+                "Offline demonstration: keyword-based proposal, not Nemotron inference."
+            )
 
         result = self._chat(
             "You compile user intent into a minimal set of sandbox tool capabilities. "
