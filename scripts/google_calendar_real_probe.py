@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import os
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
