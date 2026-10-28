@@ -66,11 +66,11 @@ node --check static/app.js
 pytest -q
 ```
 
-The tests use a stubbed model and do not require credits. The security matrix checks 64 capability combinations against all six registered tools (384 allow/deny cases). They cover policy default-deny, signed-plan tampering, authorization escalation, permission subsets, blocked malicious tool attempts, invalid arguments, audit chaining, and end-to-end API flow.
+The tests use a stubbed model and do not require credits. The inference wire-contract suite checks JSON-mode requests, thinking-disabled output, truncated answers, compatibility fallback, and strict fail-closed parsing. The security matrix checks 64 capability combinations against all six registered tools (384 allow/deny cases). They cover policy default-deny, signed-plan tampering, authorization escalation, permission subsets, blocked malicious tool attempts, invalid arguments, audit chaining, and end-to-end API flow.
 
 ### Deploy
 
-**Vercel:** Import this GitHub repository as a Python/FastAPI project, Vercel auto-detects root `app.py` as the FastAPI ASGI entrypoint; no rewrite configuration is required. Set **all** of `NEBIUS_API_KEY`, `APP_SIGNING_KEY` and `APP_ACCESS_KEY`, and optionally `NEBIUS_MODEL`. Give judges the private access key; never put it into source control. Keep `DEMO_MODE=false`. All data is request-local and stateless; no database or durable tool actions are required.
+**Vercel:** Import this GitHub repository as a Python/FastAPI project, The FastAPI ASGI application is `app.main:app` (see the explicit `[tool.vercel]` entrypoint in `pyproject.toml`). There is no root `app.py`; do not configure an old root-module entrypoint. Set **all** of `NEBIUS_API_KEY`, `APP_SIGNING_KEY` and `APP_ACCESS_KEY`, and optionally `NEBIUS_MODEL`. Give judges the private access key; never put it into source control. Keep `DEMO_MODE=false`. All data is request-local and stateless; no database or durable tool actions are required.
 
 **Docker / VPS / Railway:** `docker build -t delegation-firewall . && docker run -p 8000:8000 --env-file .env delegation-firewall`. Environment files are read by Docker, not by the Python app itself.
 
