@@ -63,8 +63,33 @@ class NebiusClient:
                 if not isinstance(content, str) or len(content) > 12000:
                     raise InferenceError("Unsupported model content; no action executed")
                 return json_object(content)
-        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
-            raise InferenceError(f"Nebius inference failed ({type(exc).__name__})") from exc
+        except httpx.HTTPStatusError as exc:
+            status = exc.response.status_code
+            if status == 400:
+                diagnosis = "Invalid inference request or model parameters"
+            elif status == 401:
+                diagnosis = "Nebius API key rejected"
+            elif status == 402:
+                diagnosis = "Nebius account has insufficient credits or billing access"
+            elif status == 403:
+                diagnosis = "Nebius account or model access denied"
+            elif status == 404:
+                diagnosis = "Nebius model ID or endpoint not found"
+            elif status == 429:
+                diagnosis = "Nebius rate limit or quota exceeded"
+            elif 500 <= status <= 599:
+                diagnosis = "Nebius upstream service error"
+            else:
+                diagnosis = "Nebius request rejected"
+            raise InferenceError(
+                f"Nebius HTTP {status}: {diagnosis}. Check Token Factory and deployment settings."
+            ) from None
+        except httpx.TimeoutException:
+            raise InferenceError("Nebius inference timed out; retry later") from None
+        except httpx.RequestError:
+            raise InferenceError("Nebius network connection failed") from None
+        except (KeyError, IndexError, TypeError, ValueError):
+            raise InferenceError("Nebius response format invalid; no action executed") from None
 
     def plan(self, intent: str) -> tuple[list[str], str]:
         if self.demo:
