@@ -1,8 +1,9 @@
-"""Tool authorization. This module is the only enforcement authority."""
+"""Deterministic capability authorization and short-lived signed plan envelopes."""
 
 from __future__ import annotations
 
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -24,6 +25,7 @@ class Capability(StrEnum):
 
 
 CAPABILITIES = frozenset(item.value for item in Capability)
+WORKFLOW_CAPABILITIES = frozenset({"email.read", "calendar.create"})
 TOOL_CAPABILITIES = {
     "read_email": Capability.EMAIL_READ,
     "send_email": Capability.EMAIL_SEND,
@@ -35,7 +37,7 @@ TOOL_CAPABILITIES = {
 
 
 class PolicyError(ValueError):
-    """Request violates the immutable permission boundary."""
+    """A request violates a capability boundary or plan integrity."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -52,11 +54,13 @@ class Policy:
 
 
 class PlanSigner:
-    """Stateless HMAC-signed, expiring plan envelope. Prevents client plan escalation."""
+    """HMAC binds scope, intent and inference mode. Not a one-time-use token."""
 
-    def __init__(self, secret: str, ttl_seconds: int = 1800):
+    def __init__(self, secret: str, ttl_seconds: int = 900):
         if len(secret) < 32:
             raise ValueError("APP_SIGNING_KEY must contain at least 32 characters")
+        if not 1 <= ttl_seconds <= 3600:
+            raise ValueError("Invalid plan TTL")
         self._key = secret.encode("utf-8")
         self._ttl = ttl_seconds
 
@@ -66,17 +70,25 @@ class PlanSigner:
 
     @staticmethod
     def _decode(raw: str) -> bytes:
-        return base64.urlsafe_b64decode(raw + "=" * (-len(raw) % 4))
+        if not raw or len(raw) > 4000:
+            raise PolicyError("Invalid base64 payload")
+        return base64.b64decode(raw + "=" * (-len(raw) % 4), altchars=b"-_", validate=True)
 
     def issue(self, intent: str, proposed: list[str], mode: str) -> str:
-        if any(item not in CAPABILITIES for item in proposed):
-            raise PolicyError("Unsupported capability in plan")
+        if not isinstance(intent, str) or not 20 <= len(intent) <= 500:
+            raise PolicyError("Invalid intent")
+        if not isinstance(proposed, list) or not proposed or any(
+            not isinstance(item, str) or item not in WORKFLOW_CAPABILITIES for item in proposed
+        ):
+            raise PolicyError("Unsupported workflow capability in plan")
+        if mode not in {"SIMULATED", "NEBIUS"}:
+            raise PolicyError("Invalid inference mode")
         payload = {
             "intent": intent,
             "proposed": sorted(set(proposed)),
             "mode": mode,
             "iat": int(time.time()),
-            "nonce": secrets.token_hex(8),
+            "nonce": secrets.token_hex(16),
         }
         body = self._encode(json.dumps(payload, sort_keys=True, separators=(",", ":")).encode())
         mac = hmac.new(self._key, body.encode(), hashlib.sha256).digest()
@@ -84,32 +96,47 @@ class PlanSigner:
 
     def verify(self, token: str) -> dict[str, Any]:
         try:
-            body, signature = token.split(".", maxsplit=1)
+            if not isinstance(token, str) or len(token) > 4000:
+                raise PolicyError("Invalid plan length")
+            body, signature = token.split(".")
             expected = hmac.new(self._key, body.encode(), hashlib.sha256).digest()
-            if not hmac.compare_digest(expected, self._decode(signature)):
+            provided = self._decode(signature)
+            if len(provided) != 32 or not hmac.compare_digest(expected, provided):
                 raise PolicyError("Plan signature mismatch")
             payload = json.loads(self._decode(body))
-            age = int(time.time()) - payload["iat"]
+            if not isinstance(payload, dict):
+                raise PolicyError("Invalid plan payload")
+            issued = payload["iat"]
+            if type(issued) is not int:
+                raise PolicyError("Invalid plan timestamp")
+            age = int(time.time()) - issued
             if age < -60 or age > self._ttl:
                 raise PolicyError("Plan expired: analyze the task again")
             proposed = payload["proposed"]
-            if not isinstance(proposed, list) or any(x not in CAPABILITIES for x in proposed):
+            if not isinstance(proposed, list) or not proposed or any(
+                not isinstance(p, str) or p not in WORKFLOW_CAPABILITIES for p in proposed
+            ):
                 raise PolicyError("Invalid plan capabilities")
-            if not isinstance(payload["intent"], str):
+            if not isinstance(payload["intent"], str) or not 20 <= len(payload["intent"]) <= 500:
                 raise PolicyError("Invalid plan intent")
+            if payload["mode"] not in {"SIMULATED", "NEBIUS"}:
+                raise PolicyError("Invalid plan mode")
+            if not isinstance(payload["nonce"], str) or len(payload["nonce"]) != 32:
+                raise PolicyError("Invalid plan nonce")
             return payload
-        except (ValueError, KeyError, TypeError, UnicodeError) as exc:
+        except (ValueError, KeyError, TypeError, UnicodeError, binascii.Error) as exc:
             if isinstance(exc, PolicyError):
                 raise
             raise PolicyError("Invalid signed plan") from exc
 
 
 def approved_policy(proposed: list[str], approved: list[str]) -> Policy:
+    if any(not isinstance(p, str) for p in approved):
+        raise PolicyError("Invalid permission type")
     if len(approved) != len(set(approved)):
         raise PolicyError("Duplicate permissions are not allowed")
-    unknown = set(approved) - set(proposed)
-    if unknown:
-        raise PolicyError(f"Cannot approve permissions outside the signed plan: {sorted(unknown)}")
+    if set(approved) - set(proposed):
+        raise PolicyError("Cannot approve permissions outside the signed plan")
     return Policy(approved=frozenset(approved))
 
 
