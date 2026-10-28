@@ -7,7 +7,7 @@ Scope: FastAPI + NVIDIA Nemotron (Nebius Token Factory) **fictional email/calend
 | Severity | Finding | Fix |
 | --- | --- | --- |
 | High | Any created calendar item previously made the task appear completed, even if the time was wrong | Timezone-aware UTC equivalence to verified fixture; wrong/naive timestamps and duplicate events rejected |
-| High | If exposed publicly, unauthenticated API calls could burn Nebius inference credits | Server-side shared `APP_ACCESS_KEY` required for live mode, per-worker request limiter (12/min) and concurrent inference cap (2) |
+| High | If exposed publicly, unauthenticated API calls could burn Nebius inference credits | Server-side shared `APP_ACCESS_KEY` required for live mode, per-source limiter (12/min), process-wide budget (24/min), concurrency cap (2), and 8 KiB Content-Length gate |
 | Medium | Malformed base64 signature/envelope could yield a 500 | Strict base64/HMAC/payload validation with fail-closed `PolicyError` |
 | Medium | Calendar lost the actual 10:00 PDT deadline, which is midnight in Jakarta | Preserve `start_at` as offset-aware ISO 8601; verify absolute UTC instant |
 | Medium | Irrelevant mail contents were exposed to the model | Filter sandbox read to only the relevant fictional email |
