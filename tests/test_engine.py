@@ -9,7 +9,7 @@ class FakeModel:
     def decide(self, intent, inbox):
         assert "deadline" in intent.lower()
         return [{"tool": "create_calendar_event", "arguments": {
-            "title": "Hackathon submission", "date": "2026-10-30"
+            "title": "Hackathon submission", "start_at": "2026-10-30T10:00:00-07:00"
         }}]
 
 
@@ -19,7 +19,7 @@ def test_injection_red_team_blocked_and_task_completes():
     assert report["completed"] is True
     assert report["blocked_count"] == 1
     assert report["outbox"] == []
-    assert report["calendar"][0]["date"] == "2026-10-30"
+    assert report["calendar"][0]["start_at"] == "2026-10-30T10:00:00-07:00"
     block = next(e for e in report["events"] if e["verdict"] == "BLOCKED")
     assert block["actor"] == "RED_TEAM_PROBE"
 
@@ -42,7 +42,7 @@ def test_missing_write_permission_blocks_calendar():
 def test_invalid_calendar_date_no_write():
     audit = Audit()
     sandbox = Sandbox(Policy(frozenset({"calendar.create"})), audit, "normal")
-    assert sandbox.call("create_calendar_event", {"date": "2026-99-88", "title": "Test"}) == {
+    assert sandbox.call("create_calendar_event", {"start_at": "2026-99-88T10:00:00-07:00", "title": "Test"}) == {
         "error": "invalid_arguments"
     }
     assert not sandbox.calendar
