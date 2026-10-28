@@ -43,6 +43,14 @@ class RunRequest(BaseModel):
 
 @app.middleware("http")
 async def security_headers(request: Request, call_next):
+    if request.url.path in {"/api/plan", "/api/run"}:
+        raw_length = request.headers.get("content-length")
+        if raw_length is not None:
+            try:
+                if int(raw_length) > 8192:
+                    return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+            except ValueError:
+                return JSONResponse(status_code=400, content={"detail": "Invalid content length"})
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
@@ -79,12 +87,18 @@ def check_budget(request: Request) -> None:
     identity = request.client.host if request.client else "unknown"
     now = time.monotonic()
     with _window_lock:
+        global_events = _hits["__process_total__"]
+        while global_events and now - global_events[0] > 60:
+            global_events.popleft()
+        if len(global_events) >= 24:
+            raise HTTPException(status_code=429, detail="Instance request budget reached")
         events = _hits[identity]
         while events and now - events[0] > 60:
             events.popleft()
         if len(events) >= 12:
             raise HTTPException(status_code=429, detail="Request limit reached; retry later")
         events.append(now)
+        global_events.append(now)
         # Do not accumulate stale identities forever in this small demonstration service.
         if len(_hits) > 1024:
             for key, history in list(_hits.items()):
