@@ -7,7 +7,7 @@ import json
 from datetime import date
 from typing import Any
 
-from app.nebius import NebiusClient
+from app.nebius import InferenceError, NebiusClient
 from app.policy import Policy
 
 
@@ -148,7 +148,6 @@ def execute(intent: str, scenario: str, policy: Policy, client: NebiusClient) ->
                 sandbox.call(action["tool"], action["arguments"])
         except Exception as exc:
             # Fail closed on inference failure, do not bypass policy with fixed actions.
-            from app.nebius import InferenceError
             if not isinstance(exc, InferenceError):
                 raise
             agent_error = str(exc)
