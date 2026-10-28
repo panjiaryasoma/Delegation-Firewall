@@ -179,3 +179,28 @@ def test_process_wide_budget_even_across_different_ips():
         assert error.value.status_code == 429
     finally:
         main._hits.clear()
+
+
+@pytest.mark.parametrize("intent", [
+    "Read my deadline email, but do not add it to my calendar.",
+    "Read email about the deadline and never create an event on my calendar.",
+    "Read email, add deadline to calendar, then send it to everyone.",
+    "Read email and add deadline to calendar, then delete messages.",
+    "Baca email deadline tapi jangan tambahkan ke kalender.",
+])
+def test_negated_or_unsupported_intent_rejected_before_inference(monkeypatch, intent):
+    monkeypatch.setenv("DEMO_MODE", "true")
+    from app.main import app
+
+    response = TestClient(app).post("/api/plan", json={"intent": intent})
+    assert response.status_code == 422
+
+
+def test_supported_positive_intent_still_works(monkeypatch):
+    monkeypatch.setenv("DEMO_MODE", "true")
+    from app.main import app
+
+    response = TestClient(app).post("/api/plan", json={
+        "intent": "Read my hackathon emails and add the deadline to my calendar."
+    })
+    assert response.status_code == 200
