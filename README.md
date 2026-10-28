@@ -57,6 +57,13 @@ DEMO_MODE=true uvicorn app.main:app --reload
 
 On Windows PowerShell: `$env:DEMO_MODE='true'; uvicorn app.main:app --reload`.
 
+### Optional real Google Calendar proof
+
+For independent provider-side verification, use the **local-only, opt-in**
+[Google Calendar integration test](REAL_CALENDAR_TEST.md). It uses the same
+permission gate, a fictional inbox, and a dedicated Google test calendar to
+create and read back a real event. No OAuth credentials are deployed on Vercel.
+
 ### Testing
 
 ```bash
