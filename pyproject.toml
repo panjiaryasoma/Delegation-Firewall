@@ -1,6 +1,6 @@
 [project]
 name = "delegation-firewall"
-version = "0.1.0"
+version = "0.2.0"
 description = "Intent-scoped tool authorization for AI agents, powered by NVIDIA Nemotron on Nebius."
 readme = "README.md"
 requires-python = ">=3.11"
