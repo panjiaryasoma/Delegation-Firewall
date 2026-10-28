@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f8f8f5">
+  <meta name="description" content="A least-privilege tool gate for AI agents. Analyze the task, approve the scope, observe every tool call.">
+  <title>Delegation Firewall — Agents need boundaries.</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <script src="/static/app.js" defer></script>
+</head>
+<body>
+  <div class="layout">
+    <aside class="sidebar">
+      <div class="brand"><span class="brand-mark" aria-hidden="true">◧</span><span>delegation<span class="brand-sub">/ firewall</span></span></div>
+      <div class="side-nav">
+        <div class="nav-label">WORKSPACE</div>
+        <a class="nav-item active" href="#workspace"><span aria-hidden="true">▦</span> Sandbox workspace</a>
+        <a class="nav-item" href="#activity"><span aria-hidden="true">◴</span> Execution trace</a>
+        <a class="nav-item" href="#about"><span aria-hidden="true">ⓘ</span> How it works</a>
+      </div>
+      <div class="side-foot"><div class="side-foot-label">BUILD 0.1.0</div><p>Human intent is the boundary.<br>Tools never decide their own permissions.</p><div class="status-tag"><span class="status-dot" id="status-dot"></span><span id="system-status">Checking inference…</span></div></div>
+    </aside>
+    <main class="main" id="workspace">
+      <header class="topbar"><div><span class="eyebrow">AGENT SECURITY / CONTROL PLANE</span><h1>Agents need boundaries<span class="accent">.</span></h1><p class="subtitle">Give an agent a task, not your entire account. Observe exactly what it tries to do.</p></div><div class="environment"><span class="env-dot"></span><span>SANDBOX ENVIRONMENT</span></div></header>
+      <div class="progress" aria-label="Workflow steps"><span class="progress-step selected" id="stage-1"><b>01</b> Delegate</span><span class="progress-line"></span><span class="progress-step" id="stage-2"><b>02</b> Review scope</span><span class="progress-line"></span><span class="progress-step" id="stage-3"><b>03</b> Execute</span><span class="progress-line"></span><span class="progress-step" id="stage-4"><b>04</b> Audit</span></div>
+      <div class="workspace-grid">
+        <section class="panel task-panel">
+          <div class="panel-title"><span class="panel-number">01</span><div><h2>Define intent</h2><p>What should this agent accomplish?</p></div></div>
+          <label class="field-label" for="intent">DELEGATED TASK</label>
+          <textarea id="intent" rows="4" maxlength="500" spellcheck="false">Read my hackathon emails and add the submission deadline to my calendar.</textarea>
+          <div class="input-footer"><span>No external account connected. All data is fictional.</span><span id="char-count">0 / 500</span></div>
+          <div class="preset-row"><span>TRY</span><button type="button" class="chip" data-preset="deadline">Hackathon deadlines</button><button type="button" class="chip" data-preset="read">Read-only review</button></div>
+          <button id="analyze" class="primary-button" type="button"><span>Analyze permissions</span><span aria-hidden="true">↗</span></button>
+          <p class="error" role="alert" id="plan-error" hidden></p>
+        </section>
+        <section class="panel scope-panel" id="scope-panel">
+          <div class="panel-title"><span class="panel-number">02</span><div><h2>Permission boundary</h2><p>Minimize scope before execution.</p></div><span class="pill pending" id="policy-state">NOT ANALYZED</span></div>
+          <div id="scope-empty" class="empty-state"><div class="empty-glyph">◇</div><p>Your permission plan will appear here.</p><small>Nemotron proposes. You approve. The policy engine enforces.</small></div>
+          <div id="scope-content" hidden><div class="scope-intro" id="scope-reason"></div><div class="group-heading">RECOMMENDED CAPABILITIES <span id="required-count"></span></div><div id="required-permissions" class="permissions"></div><div class="group-heading extra-heading">OUTSIDE TASK SCOPE</div><div id="unused-permissions" class="permissions"></div><div class="approval-row"><label class="confirm"><input type="checkbox" id="approve-check"><span>I approve only the selected capabilities.</span></label><button id="execute" class="primary-button" type="button" disabled>Execute in sandbox <span aria-hidden="true">↗</span></button></div><div class="mini-note" id="scope-mode"></div></div>
+          <p class="error" role="alert" id="run-error" hidden></p>
+        </section>
+      </div>
+      <section class="panel activity-panel" id="activity"><div class="activity-heading"><div class="panel-title"><span class="panel-number">03</span><div><h2>Execution trace</h2><p>Every tool request passes through the same gate.</p></div></div><div class="scenario-picker"><label for="scenario">TEST SCENARIO</label><select id="scenario"><option value="prompt_injection">Prompt injection + gate probe</option><option value="overreach">Overreach probe</option><option value="normal">Normal execution</option></select></div></div><div class="activity-inner" id="activity-empty"><div class="terminal-icon">_</div><p>No agent activity yet.</p><small>Approve a policy and execute a scenario to inspect the decision trail.</small></div><div id="activity-results" hidden><div class="execution-summary"><div><span class="metric-label">AUTHORIZED CALLS</span><strong class="metric" id="allowed-number">0</strong></div><div><span class="metric-label">BLOCKED CALLS</span><strong class="metric danger" id="blocked-number">0</strong></div><div><span class="metric-label">TASK STATUS</span><strong class="metric-word" id="task-status">—</strong></div><div><span class="metric-label">INFERENCE MODE</span><strong class="metric-word" id="run-mode">—</strong></div></div><div class="event-head"><span>TOOL / ACTION</span><span>ACTOR</span><span>DECISION</span></div><div id="events" class="event-list"></div><div class="result-footer"><div><span class="group-heading">CALENDAR ARTIFACTS</span><div id="calendar-items"></div></div><div><span class="group-heading">AUDIT DIGEST · SHA-256 CHAIN</span><code class="digest" id="audit-digest"></code><p class="footnote">Digest protects report ordering only. This demo does not persist an immutable external audit store.</p></div></div></div></section>
+      <section class="notes-section" id="about"><div><span class="eyebrow">ARCHITECTURE PRINCIPLE</span><h2>AI can propose.<br>It cannot grant itself access.</h2></div><div class="notes-body"><p><b>Nemotron on Nebius Token Factory</b> compiles the human task into a proposed capability set and chooses sandbox actions. A separate, deterministic Python policy gate authorizes or blocks every tool invocation.</p><p><b>Adversarial mode</b> introduces an untrusted email and independently issues a labeled red-team tool probe, so blocked probes are never misrepresented as spontaneous model behavior. No real messages are sent or deleted.</p><a href="https://github.com/panjiaryasoma/Delegation-Firewall" target="_blank" rel="noopener noreferrer">View source on GitHub ↗</a></div></section>
+      <footer class="footer"><span>Delegation Firewall / Hackathon prototype</span><span>Least privilege by construction, not by prompt.</span></footer>
+    </main>
+  </div>
+</body>
+</html>
