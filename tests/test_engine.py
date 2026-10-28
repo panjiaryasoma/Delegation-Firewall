@@ -43,7 +43,8 @@ def test_invalid_calendar_date_no_write():
     audit = Audit()
     sandbox = Sandbox(Policy(frozenset({"calendar.create"})), audit, "normal")
     assert sandbox.call("create_calendar_event", {
-        "start_at": "2026-99-88T10:00:00-07:00", "title": "Test"\n    }) == {
+        "start_at": "2026-99-88T10:00:00-07:00", "title": "Test"
+    }) == {
         "error": "invalid_arguments"
     }
     assert not sandbox.calendar
