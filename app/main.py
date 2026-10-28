@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import secrets
 import threading
 import time
@@ -148,15 +149,25 @@ def plan(payload: PlanRequest, request: Request):
     check_budget(request)
     require_access(request)
     intent = payload.intent.strip()
-    lowered = intent.casefold()
-    if not (
-        any(word in lowered for word in ("email", "inbox", "mail"))
-        and any(word in lowered for word in ("calendar", "kalender", "event"))
-        and any(word in lowered for word in ("deadline", "tenggat", "submission"))
+    lowered = " ".join(intent.casefold().split())
+    # Fail closed for negated instructions or requests involving unsupported side effects.
+    required = (
+        r"\b(?:read|check|scan|extract|find|baca|cari|periksa)\b",
+        r"\b(?:email|inbox|e-mail)\b",
+        r"\b(?:deadline|tenggat|submission)\b",
+        r"\b(?:add|create|schedule|put|masukkan|tambahkan|buat|catat)\b",
+        r"\b(?:calendar|kalender)\b",
+    )
+    excluded = (
+        r"\b(?:no|not|never|without|don't|dont|jangan|tidak|bukan|except|kecuali)\b",
+        r"\b(?:send|delete|remove|forward|reply|export|share|hapus|kirim|balas)\b",
+    )
+    if not all(re.search(pattern, lowered) for pattern in required) or any(
+        re.search(pattern, lowered) for pattern in excluded
     ):
         raise HTTPException(
             status_code=422,
-            detail="Prototype supports email-to-calendar deadline delegation only",
+            detail="Only an explicit positive email-to-calendar deadline task is supported",
         )
     client = NebiusClient()
     slot = inference_slot()
