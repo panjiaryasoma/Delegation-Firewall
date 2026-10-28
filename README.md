@@ -18,7 +18,7 @@ Agents should not inherit broad account privileges for narrow tasks. A user who 
 2. Nemotron proposes `email.read` and `calendar.create`; human approves the scope.
 3. Choose **Prompt injection + gate probe**. The sandbox inbox includes an untrusted email attempting to instruct an agent to exfiltrate messages.
 4. The system performs a **clearly labeled scripted red-team probe** using `send_email` and blocks it at the policy gate. Independently, Nemotron reads the messages and proposes a calendar action. If it attempts an unauthorized tool, that attempt is blocked too.
-5. Inspect the final calendar artifact and SHA-256-linked audit records.
+5. Inspect the **verified timestamp** (October 30, 2026 at 10:00 PDT / October 31 at 00:00 WIB), final calendar artifact and SHA-256-linked audit records. Incorrect dates, timezone-naive timestamps and duplicate event attempts are rejected.
 
 **Security honesty:** A blocked red-team probe is **not** evidence that Nemotron itself obeyed a malicious email. The UI labels the probe `RED_TEAM_PROBE`, separate from `AGENT` calls. The sandbox never touches real Gmail, Calendar, external recipients, or personal information. The digest is not a persisted immutable log.
 
@@ -29,7 +29,7 @@ Agents should not inherit broad account privileges for narrow tasks. A user who 
 | API | Python 3.11+, FastAPI | Input validation, orchestration, single-origin hosting |
 | Inference | NVIDIA `Nemotron-3_5-Lightning` via Nebius Token Factory | Natural-language capability extraction, inbox-to-action reasoning |
 | Enforcement | Python capability registry + immutable policy + default-deny gate | Authoritative tool authorization, independent of model text |
-| Integrity | HMAC-SHA256 signed plan envelope, 30-minute expiry | Prevent client-side capability escalation between plan and execution |
+| Integrity | HMAC-SHA256 signed plan envelope, 15-minute expiry | Prevent client-side capability escalation between plan and execution |
 | Tools | In-process disposable email/calendar sandbox | Safe real tool dispatch with no external side effects |
 | UI | Vanilla JavaScript + CSS | Intent, scope, approval, trace, results |
 | CI | GitHub Actions, Ruff, pytest | Static lint and automated tests |
@@ -43,6 +43,7 @@ pip install -e '.[dev]'
 cp .env.example .env          # set values in your shell; .env is not auto-loaded
 export NEBIUS_API_KEY='your-token-factory-key'
 export APP_SIGNING_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(48))')"
+export APP_ACCESS_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
 uvicorn app.main:app --reload
 ```
 
@@ -63,11 +64,11 @@ ruff check .
 pytest -q
 ```
 
-The tests use a stubbed model and do not require credits. They cover policy default-deny, signed-plan tampering, authorization escalation, permission subsets, blocked malicious tool attempts, invalid arguments, audit chaining, and end-to-end API flow.
+The tests use a stubbed model and do not require credits. The security matrix checks 64 capability combinations against all six registered tools (384 allow/deny cases). They cover policy default-deny, signed-plan tampering, authorization escalation, permission subsets, blocked malicious tool attempts, invalid arguments, audit chaining, and end-to-end API flow.
 
 ### Deploy
 
-**Vercel:** Import this GitHub repository as a Python/FastAPI project, Vercel auto-detects root `app.py` as the FastAPI ASGI entrypoint; no rewrite configuration is required. Set `NEBIUS_API_KEY`, `APP_SIGNING_KEY`, and optionally `NEBIUS_MODEL`. Keep `DEMO_MODE=false`. All data is request-local and stateless; no database or durable tool actions are required.
+**Vercel:** Import this GitHub repository as a Python/FastAPI project, Vercel auto-detects root `app.py` as the FastAPI ASGI entrypoint; no rewrite configuration is required. Set **all** of `NEBIUS_API_KEY`, `APP_SIGNING_KEY` and `APP_ACCESS_KEY`, and optionally `NEBIUS_MODEL`. Give judges the private access key; never put it into source control. Keep `DEMO_MODE=false`. All data is request-local and stateless; no database or durable tool actions are required.
 
 **Docker / VPS / Railway:** `docker build -t delegation-firewall . && docker run -p 8000:8000 --env-file .env delegation-firewall`. Environment files are read by Docker, not by the Python app itself.
 
@@ -76,7 +77,7 @@ The application does **not** connect production providers. Adding real providers
 ## Source-of-truth boundaries
 
 - **LLM:** Proposes capabilities and agent actions; untrusted output always validated.
-- **Human:** Approves a *subset* of the signed proposal; cannot silently approve extra capabilities via client tampering.
+- **Human:** UI checkbox approves a *subset* of the signed proposal; server rejects added capabilities. This is NOT authenticated human-attestation or per-user identity.
 - **Policy engine:** Maps server-registered tool names to immutable capabilities. Unknown tools are denied. Every tool attempt must traverse the gate.
 - **Sandbox:** Performs isolated in-memory mutations and returns real execution records. No outgoing email, no real user data.
 - **Audit:** Per-execution hash-linked event sequence; no claim of durable persistence/tamper-proof external storage.
@@ -84,11 +85,15 @@ The application does **not** connect production providers. Adding real providers
 ## Known limits
 
 - Model-generated proposals can be wrong, incomplete, or overly broad; human scope review is mandatory.
-- Plan tokens have a time limit and signed contents but are **not single-use/revocable**. This is acceptable only because all tools are synthetic and isolated.
+- Plan tokens expire after 15 minutes and are signed but are **not single-use/revocable**. This is acceptable only because all tools are synthetic and isolated.
 - No external provider integrations, real authorization delegation, identity management, webhook processing, or sandbox hardening against arbitrary code (none is executed).
-- Inference availability/model JSON quality and latency require live Nebius key validation. Invalid model output fails closed.
+- Inference availability/model JSON quality and latency require live Nebius key validation. Live mode requires a shared private `APP_ACCESS_KEY`; a 12-request-per-minute, 2-concurrent-operation limiter is **per worker**, not distributed. Invalid model output fails closed.
 - The red-team probe verifies policy enforcement; full autonomous prompt-injection susceptibility is not guaranteed or implied.
+- The entire application is **one fixed email-to-calendar deadline workflow**. Capability inference is not general-purpose: the two allowed permissions for this workflow are fixed. The task's deadline and timezone are verified against a known **sandbox fixture**, not arbitrary real-world sources.
+- The UI checkbox is not a cryptographic proof that an authenticated human approved the action. The audit hash chain is response-local and not externally anchored.
 - For Devpost judging, configure a *live* Nebius key and verify both plan and execution show `NEBIUS` mode. Offline simulation alone does not satisfy model-use requirements.
+
+Read [SECURITY_AUDIT.md](SECURITY_AUDIT.md) for the review loop, fixed findings, tests, and accepted risks.
 
 ## License
 
