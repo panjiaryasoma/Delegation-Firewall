@@ -61,6 +61,8 @@ On Windows PowerShell: `$env:DEMO_MODE='true'; uvicorn app.main:app --reload`.
 
 ```bash
 ruff check .
+python -m compileall -q app
+node --check static/app.js
 pytest -q
 ```
 
@@ -89,6 +91,7 @@ The application does **not** connect production providers. Adding real providers
 - No external provider integrations, real authorization delegation, identity management, webhook processing, or sandbox hardening against arbitrary code (none is executed).
 - Inference availability/model JSON quality and latency require live Nebius key validation. Live mode requires a shared private `APP_ACCESS_KEY`; 12 requests/minute per source, 24 requests/minute total per process and at most 2 concurrent inference operations are **per worker**, not distributed. Request Content-Length over 8 KiB is rejected before JSON parsing; this is not full streaming body enforcement. Invalid model output fails closed.
 - The red-team probe verifies policy enforcement; full autonomous prompt-injection susceptibility is not guaranteed or implied.
+- The application rejects explicit negations (e.g. “do not add this to my calendar”) and unsupported side-effect verbs before inference. This is a conservative admission filter, **not** a general semantic authorization proof.
 - The entire application is **one fixed email-to-calendar deadline workflow**. Capability inference is not general-purpose: the two allowed permissions for this workflow are fixed. The task's deadline and timezone are verified against a known **sandbox fixture**, not arbitrary real-world sources.
 - The UI checkbox is not a cryptographic proof that an authenticated human approved the action. The audit hash chain is response-local and not externally anchored.
 - For Devpost judging, configure a *live* Nebius key and verify both plan and execution show `NEBIUS` mode. Offline simulation alone does not satisfy model-use requirements.
