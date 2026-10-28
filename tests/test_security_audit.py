@@ -150,3 +150,32 @@ def test_response_security_headers():
     response = TestClient(app).get("/")
     assert response.headers["x-frame-options"] == "DENY"
     assert "script-src 'self'" in response.headers["content-security-policy"]
+
+
+def test_oversized_body_is_rejected_before_parsing():
+    from app.main import app
+
+    response = TestClient(app).post(
+        "/api/plan", content=b"x" * 9000,
+        headers={"Content-Type": "application/json"},
+    )
+    assert response.status_code == 413
+    assert response.headers["cache-control"] == "no-store"
+
+
+def test_process_wide_budget_even_across_different_ips():
+    from types import SimpleNamespace
+    from fastapi import HTTPException
+    from app import main
+
+    main._hits.clear()
+    try:
+        for n in range(24):
+            request = SimpleNamespace(client=SimpleNamespace(host=f"198.51.100.{n + 1}"))
+            main.check_budget(request)
+        request = SimpleNamespace(client=SimpleNamespace(host="203.0.113.3"))
+        with pytest.raises(HTTPException) as error:
+            main.check_budget(request)
+        assert error.value.status_code == 429
+    finally:
+        main._hits.clear()
