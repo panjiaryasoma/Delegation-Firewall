@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Literal
 
@@ -43,7 +42,8 @@ def health():
     return {
         "service": "delegation-firewall",
         "status": "ok",
-        "mode": client.mode if client.demo else ("NEBIUS_CONFIGURED" if client.api_key else "NO_API_KEY"),
+        "mode": (client.mode if client.demo
+                 else ("NEBIUS_CONFIGURED" if client.api_key else "NO_API_KEY")),
         "model": MODEL,
         "signing_key_configured": _configured_secret,
         "sandbox_only": True,
@@ -63,7 +63,9 @@ def plan(payload: PlanRequest):
     except InferenceError as exc:
         raise HTTPException(status_code=503, detail=str(exc)) from exc
     if not proposed:
-        raise HTTPException(status_code=422, detail="No supported capability identified for this task")
+        raise HTTPException(
+            status_code=422, detail="No supported capability identified for this task"
+        )
     token = signer.issue(payload.intent.strip(), proposed, client.mode)
     return {
         "intent": payload.intent.strip(),
