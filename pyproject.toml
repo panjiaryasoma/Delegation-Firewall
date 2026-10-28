@@ -25,3 +25,6 @@ select = ["E", "F", "B", "UP"]
 
 [tool.setuptools]
 packages = ["app"]
+
+[tool.vercel]
+entrypoint = "app.main:app"
