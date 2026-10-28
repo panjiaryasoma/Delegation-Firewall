@@ -48,9 +48,15 @@ async def security_headers(request: Request, call_next):
         if raw_length is not None:
             try:
                 if int(raw_length) > 8192:
-                    return JSONResponse(status_code=413, content={"detail": "Request body too large"})
+                    return JSONResponse(
+                        status_code=413, content={"detail": "Request body too large"},
+                        headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+                    )
             except ValueError:
-                return JSONResponse(status_code=400, content={"detail": "Invalid content length"})
+                return JSONResponse(
+                    status_code=400, content={"detail": "Invalid content length"},
+                    headers={"Cache-Control": "no-store", "X-Content-Type-Options": "nosniff"},
+                )
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["X-Frame-Options"] = "DENY"
